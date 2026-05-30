@@ -5,12 +5,24 @@ import { useState, useEffect } from "react";
 import { Logo } from "@/components/ui/Logo";
 import { incidents, Incident } from "@/content/incidents";
 import { InteractiveMap } from "@/components/dashboard/InteractiveMap";
+import { healthCheck } from "@/lib/api";
+
+type BackendStatus = "checking" | "ok" | "error";
 
 export default function DashboardPage() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
   
   // Real-time ticking cost accumulator state
   const [accruedCost, setAccruedCost] = useState<number>(0);
+
+  useEffect(() => {
+    healthCheck()
+      .then((health) => {
+        setBackendStatus(health.status === "ok" ? "ok" : "error");
+      })
+      .catch(() => setBackendStatus("error"));
+  }, []);
 
   // Initialize with the first incident on load
   useEffect(() => {
@@ -56,7 +68,11 @@ export default function DashboardPage() {
             SECURE CLIENT
           </span>
           <span className="hidden sm:inline">|</span>
-          <span className="hidden sm:inline">GRID_NODE // STABLE</span>
+          <span className="hidden sm:inline">
+            {backendStatus === "checking" && "GRID_NODE // CONNECTING"}
+            {backendStatus === "ok" && "GRID_NODE // STABLE"}
+            {backendStatus === "error" && "GRID_NODE // OFFLINE"}
+          </span>
         </div>
       </header>
 
