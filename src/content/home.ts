@@ -6,7 +6,7 @@ export const brand = {
 };
 
 export const announcement = {
-  text: "Read the GridClear Incident Clearance Playbook",
+  text: "ACCIDENT KING @ BLOOR - K9 TEAM ON SCENE",
   href: "#",
 };
 

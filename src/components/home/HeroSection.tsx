@@ -20,7 +20,7 @@ export function HeroSection() {
         >
           <source src="/hero.mp4" type="video/mp4" />
         </video>
-        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/40 to-black/90" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/75 via-black/55 to-black/92" />
       </div>
 
       <div className="relative z-10 mx-auto flex w-full max-w-content flex-1 flex-col justify-between border-l border-r border-white/10 px-6 pb-12 pt-[7.5rem] md:px-10 md:pt-36">
@@ -30,7 +30,7 @@ export function HeroSection() {
             Autonomous Scene Clearance
           </div>
 
-          <h1 className="text-balance font-heading text-5xl font-bold leading-[0.92] tracking-[-0.04em] text-white [text-shadow:0_2px_44px_rgba(0,0,0,0.55)] sm:text-6xl md:text-7xl lg:text-[92px]">
+          <h1 className="text-balance font-heading text-5xl font-semibold leading-[0.9] tracking-[-0.03em] text-white [text-shadow:0_2px_44px_rgba(0,0,0,0.55)] sm:text-6xl md:text-[76px] lg:text-[88px]">
             {hero.headline.map((line, i) => (
               <span
                 key={line}
