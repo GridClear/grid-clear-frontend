@@ -7,7 +7,7 @@ import { socialLinks } from "@/content/home";
 export function Footer() {
   return (
     <footer className="border-t border-black/5 bg-white">
-      <div className="mx-auto max-w-content px-6 py-16 md:px-10">
+      <div className="mx-auto max-w-content border-l border-r border-black/10 px-6 py-16 md:px-10">
         <div className="flex flex-col gap-6 border-b border-black/5 pb-12 md:flex-row md:items-end md:justify-between">
           <div>
             <Logo variant="dark" />

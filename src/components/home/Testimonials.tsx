@@ -5,7 +5,7 @@ import { testimonials } from "@/content/home";
 export function Testimonials() {
   return (
     <section className="bg-white py-24 md:py-32 border-b border-black/5">
-      <div className="mx-auto max-w-content px-6 md:px-10">
+      <div className="mx-auto max-w-content border-l border-r border-black/10 px-6 md:px-10">
         <p className="font-mono text-[10px] tracking-[0.25em] text-black/50 uppercase mb-4">
           {"// FIELD TESTIMONIALS"}
         </p>

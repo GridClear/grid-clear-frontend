@@ -20,7 +20,7 @@ export function Logo({ className = "", variant = "light" }: LogoProps) {
           strokeWidth="1.5"
           fill="none"
         />
-        <circle cx="11" cy="11" r="2.5" fill={color} />
+        <circle cx="11" cy="11" r="2.5" fill="#ea580c" />
       </svg>
       <span
         className="text-[17px] font-semibold tracking-[-0.02em]"

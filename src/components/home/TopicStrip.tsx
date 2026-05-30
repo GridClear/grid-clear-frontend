@@ -12,7 +12,7 @@ interface TopicStripProps {
 export function TopicStrip({ activeId, onSelect }: TopicStripProps) {
   return (
     <div className="border-b border-black/5 bg-white py-3">
-      <div className="mx-auto max-w-content overflow-x-auto px-6 md:px-10">
+      <div className="mx-auto max-w-content border-l border-r border-black/10 overflow-x-auto px-6 md:px-10">
         <div className="flex items-center gap-1.5 font-mono text-[10px] tracking-widest text-black/40">
           <span className="hidden lg:inline mr-4 select-none font-bold text-black/50">{"// TOPIC INDEX"}</span>
           {topics.map((topic, i) => (

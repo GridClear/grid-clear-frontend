@@ -14,7 +14,7 @@ export function CareersCta() {
       />
       <div className="absolute inset-0 bg-gradient-to-r from-black via-black/95 to-black/75" />
 
-      <div className="relative mx-auto max-w-content px-6 md:px-10">
+      <div className="relative mx-auto max-w-content border-l border-r border-white/10 px-6 md:px-10">
         <p className="font-mono text-[10px] tracking-[0.25em] text-white/40 uppercase mb-6">
           [ DEPLOYMENT // JOBS ]
         </p>
@@ -24,7 +24,7 @@ export function CareersCta() {
         <p className="mt-6 max-w-xl text-lg text-white/50 leading-relaxed font-light">{careers.subheading}</p>
         <a
           href="#"
-          className="mt-10 inline-block font-mono text-[11px] font-bold tracking-widest uppercase border border-white/25 px-6 py-3.5 text-white hover:bg-white hover:text-black hover:border-white transition-all duration-200"
+          className="mt-10 inline-block font-mono text-[11px] font-bold tracking-widest uppercase border border-white/25 px-6 py-3.5 text-white hover:bg-white hover:text-black hover:border-white transition-all duration-200 active:translate-y-px"
         >
           View Careers →
         </a>

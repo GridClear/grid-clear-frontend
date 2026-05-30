@@ -14,10 +14,12 @@ const config: Config = {
         "gc-muted": "var(--text-muted)",
         "gc-border": "var(--border)",
         "gc-nav-muted": "var(--text-nav-muted)",
+        "gc-accent": "var(--accent)",
+        "gc-accent-soft": "var(--accent-soft)",
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
-        heading: ["var(--font-plus-jakarta)", "var(--font-inter)", "system-ui", "sans-serif"],
+        heading: ["var(--font-display)", "var(--font-inter)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "monospace"],
       },
       maxWidth: {

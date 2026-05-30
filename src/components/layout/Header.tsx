@@ -11,6 +11,7 @@ import { NavOverlay } from "./NavOverlay";
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [hasAnnouncement, setHasAnnouncement] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 80);
@@ -26,42 +27,43 @@ export function Header() {
     };
   }, [navOpen]);
 
-  const isLight = !scrolled;
+  useEffect(() => {
+    const dismissed = sessionStorage.getItem("gc-announcement-dismissed");
+    setHasAnnouncement(dismissed !== "true");
+
+    const handleDismiss = () => setHasAnnouncement(false);
+    window.addEventListener("gc-announcement-dismissed", handleDismiss);
+    return () => {
+      window.removeEventListener("gc-announcement-dismissed", handleDismiss);
+    };
+  }, []);
 
   return (
     <>
       <header
-        className={`fixed left-0 right-0 top-[var(--announcement-height,0px)] z-50 transition-all duration-300 border-b ${
-          isLight 
-            ? "bg-transparent border-white/10" 
-            : "bg-white/85 backdrop-blur-md border-black/5"
+        className={`fixed left-0 right-0 z-50 transition-all duration-300 border-b text-white ${
+          scrolled 
+            ? "bg-black/90 backdrop-blur-md border-white/5" 
+            : "bg-transparent border-white/10"
         }`}
-        style={{ "--announcement-height": "40px" } as React.CSSProperties}
+        style={{ top: scrolled ? "0px" : (hasAnnouncement ? "40px" : "0px") }}
       >
         <div className="mx-auto flex h-16 max-w-content items-center justify-between px-6 md:px-10">
           <Link href="/" aria-label="GridClear homepage">
-            <Logo variant={isLight ? "light" : "dark"} />
+            <Logo variant="light" />
           </Link>
 
           <div className="flex items-center gap-2">
             <Link
               href="/dashboard"
-              className={`hidden px-5 py-2.5 font-mono text-[11px] font-medium tracking-widest uppercase transition-colors duration-200 sm:inline-block border ${
-                isLight
-                  ? "bg-white border-white text-black hover:bg-transparent hover:text-white"
-                  : "bg-black border-black text-white hover:bg-transparent hover:text-black"
-              }`}
+              className="hidden px-5 py-2.5 font-mono text-[11px] font-medium tracking-widest uppercase transition-colors duration-200 sm:inline-block border bg-white border-white text-black hover:bg-transparent hover:text-white"
             >
               Command Center
             </Link>
             <button
               type="button"
               onClick={() => setNavOpen(true)}
-              className={`flex h-10 w-10 items-center justify-center border transition-colors duration-200 ${
-                isLight
-                  ? "border-white/20 text-white hover:bg-white/10"
-                  : "border-black/10 text-black hover:bg-black/5"
-              }`}
+              className="flex h-10 w-10 items-center justify-center border transition-colors duration-200 border-white/20 text-white hover:bg-white/10"
               aria-label="Show navigation"
             >
               <Menu size={16} />
