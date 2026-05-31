@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 const incidentListCache = new Map<string, IncidentReport[]>();
 const incidentByIdCache = new Map<string, IncidentReport>();
