@@ -27,6 +27,24 @@ function cacheIncident(report: IncidentReport): void {
   incidentByIdCache.set(report.incident_id, report);
 }
 
+/** One feed row per camera — keeps the newest snapshot when the API returns repeat detections. */
+export function deduplicateIncidentReports(reports: IncidentReport[]): IncidentReport[] {
+  const byCamera = new Map<string, IncidentReport>();
+  for (const report of reports) {
+    const key = report.camera_id || report.intersection;
+    const existing = byCamera.get(key);
+    if (
+      !existing ||
+      new Date(report.first_seen_at).getTime() > new Date(existing.first_seen_at).getTime()
+    ) {
+      byCamera.set(key, report);
+    }
+  }
+  return Array.from(byCamera.values()).sort(
+    (a, b) => new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime()
+  );
+}
+
 export interface HealthResponse {
   status: string;
   models_reachable: boolean;
@@ -193,15 +211,15 @@ export async function listIncidents({
   // Try the DGX Spark backend first (where real detections live).
   // Fall back to the local incidents store if DGX returns empty or errors.
   try {
-    const dgxRes = await fetch(`${BASE}/incidents/dgx/recent?limit=${limit}`, { cache: "no-store" });
+    const fetchLimit = Math.max(limit * 10, 50);
+    const dgxRes = await fetch(`${BASE}/incidents/dgx/recent?limit=${fetchLimit}`, { cache: "no-store" });
     if (dgxRes.ok) {
       const dgxData: IncidentReport[] = await dgxRes.json();
       if (dgxData.length > 0) {
-        // DGX may ignore the limit param — sort newest first and enforce it here
         dgxData.sort(
           (a, b) => new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime()
         );
-        const result = dgxData.slice(0, limit);
+        const result = deduplicateIncidentReports(dgxData).slice(0, limit);
         cacheIncidents(result, limit);
         return result;
       }
@@ -214,7 +232,11 @@ export async function listIncidents({
   if (!res.ok) {
     throw new Error(`Failed to fetch incidents: ${res.status}`);
   }
-  const result: IncidentReport[] = await res.json();
+  const data: IncidentReport[] = await res.json();
+  data.sort(
+    (a, b) => new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime()
+  );
+  const result = deduplicateIncidentReports(data).slice(0, limit);
   cacheIncidents(result, limit);
   return result;
 }

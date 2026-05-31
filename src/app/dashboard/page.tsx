@@ -6,7 +6,7 @@ import { Logo } from "@/components/ui/Logo";
 import { Incident } from "@/lib/incidents";
 import { mapIncidentReportToDashboardIncident } from "@/lib/incidents";
 import { InteractiveMap } from "@/components/dashboard/InteractiveMap";
-import { healthCheck, listIncidents, getCachedIncidents, getCachedEconomics, enrichReportsWithEconomics } from "@/lib/api";
+import { healthCheck, listIncidents, getCachedIncidents, getCachedEconomics, enrichReportsWithEconomics, deduplicateIncidentReports } from "@/lib/api";
 import { incidents as mockIncidents } from "@/content/incidents";
 
 type BackendStatus = "checking" | "ok" | "error";
@@ -16,10 +16,11 @@ const INCIDENT_LIST_LIMIT = 5;
 function getInitialIncidents(): { incidents: Incident[]; fromCache: boolean } {
   const cached = getCachedIncidents(INCIDENT_LIST_LIMIT);
   if (cached && cached.length > 0) {
-    const allHaveEconomics = cached.every((r) => getCachedEconomics(r.incident_id));
+    const deduped = deduplicateIncidentReports(cached);
+    const allHaveEconomics = deduped.every((r) => getCachedEconomics(r.incident_id));
     if (allHaveEconomics) {
       return {
-        incidents: cached.map((r) =>
+        incidents: deduped.map((r) =>
           mapIncidentReportToDashboardIncident(r, getCachedEconomics(r.incident_id))
         ),
         fromCache: true,
