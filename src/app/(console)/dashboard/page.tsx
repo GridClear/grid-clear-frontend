@@ -38,7 +38,11 @@ export default function DashboardPage() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
 
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [accruedCost] = useState<number>(0);
+
+  const durationMinutes = selectedIncident?.economics?.incident.duration_minutes ?? 90;
+  const totalClosureCost =
+    selectedIncident?.economics?.incident_totals.total_cad ??
+    Math.round((selectedIncident?.costPerMinute ?? 0) * durationMinutes);
 
   useEffect(() => {
     healthCheck()
@@ -215,16 +219,13 @@ export default function DashboardPage() {
               <div className="border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6 flex flex-col justify-between">
                 <div>
                   <span className="text-[8px] text-white/30 uppercase tracking-widest block select-none">
-                    {"// Est. Closure Cost (90 min)"}
+                    {`// Est. Closure Cost (${durationMinutes} min)`}
                   </span>
                   <div className="mt-2 text-2xl md:text-3xl font-extrabold text-gc-accent font-mono tracking-tight tabular-nums">
-                    ${accruedCost.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    ${Math.round(totalClosureCost).toLocaleString("en-US")}
                   </div>
                   <span className="text-[8px] text-white/40 block mt-1">
-                    PROJECTED 90-MIN TOTAL // CAD
+                    {`PROJECTED ${durationMinutes}-MIN TOTAL // CAD`}
                   </span>
                 </div>
 

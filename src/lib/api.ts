@@ -208,10 +208,28 @@ export async function listIncidents({
   const cached = getCachedIncidents(limit);
   if (cached) return cached;
 
-  // Try the DGX Spark backend first (where real detections live).
-  // Fall back to the local incidents store if DGX returns empty or errors.
+  const fetchLimit = Math.max(limit * 10, 50);
+
+  // Local incidents store first — avoids 404 noise when DGX route isn't deployed.
   try {
-    const fetchLimit = Math.max(limit * 10, 50);
+    const res = await fetch(`${BASE}/incidents?hours=72&limit=${fetchLimit}`, { cache: "no-store" });
+    if (res.ok) {
+      const data: IncidentReport[] = await res.json();
+      if (data.length > 0) {
+        data.sort(
+          (a, b) => new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime()
+        );
+        const result = deduplicateIncidentReports(data).slice(0, limit);
+        cacheIncidents(result, limit);
+        return result;
+      }
+    }
+  } catch {
+    // Local store unreachable — fall through to DGX
+  }
+
+  // Fall back to DGX Spark when the local store is empty or unavailable.
+  try {
     const dgxRes = await fetch(`${BASE}/incidents/dgx/recent?limit=${fetchLimit}`, { cache: "no-store" });
     if (dgxRes.ok) {
       const dgxData: IncidentReport[] = await dgxRes.json();
@@ -225,20 +243,10 @@ export async function listIncidents({
       }
     }
   } catch {
-    // DGX unreachable — fall through to local store
+    // DGX unreachable
   }
 
-  const res = await fetch(`${BASE}/incidents?hours=72&limit=${limit}`, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch incidents: ${res.status}`);
-  }
-  const data: IncidentReport[] = await res.json();
-  data.sort(
-    (a, b) => new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime()
-  );
-  const result = deduplicateIncidentReports(data).slice(0, limit);
-  cacheIncidents(result, limit);
-  return result;
+  throw new Error("Failed to fetch incidents");
 }
 
 export async function getIncidentById(incidentId: string): Promise<IncidentReport> {
@@ -253,19 +261,16 @@ export async function getIncidentById(incidentId: string): Promise<IncidentRepor
     return result;
   }
 
-  // Local store returned 404/error — search the DGX list instead
+  // Local store returned 404 — search the broader incident list (includes DGX fallback).
   try {
-    const dgxRes = await fetch(`${BASE}/incidents/dgx/recent?limit=50`, { cache: "no-store" });
-    if (dgxRes.ok) {
-      const dgxData: IncidentReport[] = await dgxRes.json();
-      const match = dgxData.find((r) => r.incident_id === incidentId);
-      if (match) {
-        cacheIncident(match);
-        return match;
-      }
+    const reports = await listIncidents({ limit: 50 });
+    const match = reports.find((r) => r.incident_id === incidentId);
+    if (match) {
+      cacheIncident(match);
+      return match;
     }
   } catch {
-    // DGX unreachable
+    // List fetch failed
   }
 
   throw new Error(`Incident not found: ${incidentId}`);
