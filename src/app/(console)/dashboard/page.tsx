@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
 
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [accruedCost, setAccruedCost] = useState<number>(0);
+  const [accruedCost] = useState<number>(0);
 
   useEffect(() => {
     healthCheck()

@@ -7,7 +7,6 @@ import { aggregateToSquares, squareCellsToGeoJSON } from "@/lib/geo/squares";
 import { CollisionTooltip } from "./CollisionTooltip";
 import { LayerControls } from "./LayerControls";
 import type { CollisionPoint, CollisionsResponse } from "@/types/collision";
-import type { HeatmapCell } from "@/types/heatmap";
 import { TORONTO_CENTER } from "@/lib/map/basemap";
 
 // Carto Dark Matter — reliable free CDN, no API key, tested with MapLibre.
