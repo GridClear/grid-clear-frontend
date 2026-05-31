@@ -1,398 +1,392 @@
 "use client";
 
-import { useEffect, useRef, useState, MouseEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Viewer } from "@mkkellogg/gaussian-splats-3d";
 
-interface Point3D {
-  x: number;
-  y: number;
-  z: number;
-  color: string;
-  size: number;
+type RenderMode = "ply" | "splat";
+const RENDER_MODE: RenderMode = "ply";
+
+const SPLAT_URL = "/incident-reconstruction.splat";
+const SPLAT_STRIDE = 32;
+const PLY_URL = "/scene.ply";
+
+interface SceneBounds {
+  center: [number, number, number];
+  radius: number;
 }
 
-interface Line3D {
-  p1: Point3D;
-  p2: Point3D;
-  color: string;
-  width: number;
+function estimateSplatBounds(buffer: ArrayBuffer): SceneBounds {
+  const view = new DataView(buffer);
+  const count = Math.floor(buffer.byteLength / SPLAT_STRIDE);
+  const step = Math.max(1, Math.floor(count / 16000));
+
+  let sumX = 0;
+  let sumY = 0;
+  let sumZ = 0;
+  let n = 0;
+
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const zs: number[] = [];
+
+  for (let i = 0; i < count; i += step) {
+    const offset = i * SPLAT_STRIDE;
+    const x = view.getFloat32(offset, true);
+    const y = view.getFloat32(offset + 4, true);
+    const z = view.getFloat32(offset + 8, true);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    sumX += x;
+    sumY += y;
+    sumZ += z;
+    xs.push(x);
+    ys.push(y);
+    zs.push(z);
+    n++;
+  }
+
+  if (n === 0) return { center: [0, 0, 0], radius: 1 };
+
+  const center: [number, number, number] = [sumX / n, sumY / n, sumZ / n];
+
+  const dists = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - center[0];
+    const dy = ys[i] - center[1];
+    const dz = zs[i] - center[2];
+    dists[i] = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+  dists.sort((a, b) => a - b);
+  const radius = dists[Math.min(dists.length - 1, Math.floor(dists.length * 0.6))];
+
+  return { center, radius: Math.max(radius, 0.5) };
+}
+
+function estimatePositionBounds(positions: ArrayLike<number>): SceneBounds {
+  const total = Math.floor(positions.length / 3);
+  if (total === 0) return { center: [0, 0, 0], radius: 1 };
+  const step = Math.max(1, Math.floor(total / 16000));
+
+  let sumX = 0;
+  let sumY = 0;
+  let sumZ = 0;
+  let n = 0;
+  const sx: number[] = [];
+  const sy: number[] = [];
+  const sz: number[] = [];
+
+  for (let i = 0; i < total; i += step) {
+    const o = i * 3;
+    const x = positions[o];
+    const y = positions[o + 1];
+    const z = positions[o + 2];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    sumX += x;
+    sumY += y;
+    sumZ += z;
+    sx.push(x);
+    sy.push(y);
+    sz.push(z);
+    n++;
+  }
+  if (n === 0) return { center: [0, 0, 0], radius: 1 };
+
+  const center: [number, number, number] = [sumX / n, sumY / n, sumZ / n];
+  const dists = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const dx = sx[i] - center[0];
+    const dy = sy[i] - center[1];
+    const dz = sz[i] - center[2];
+    dists[i] = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+  dists.sort((a, b) => a - b);
+  const radius = dists[Math.min(dists.length - 1, Math.floor(dists.length * 0.6))];
+
+  return { center, radius: Math.max(radius, 0.5) };
+}
+
+function computeCameraPlacement(bounds: SceneBounds): {
+  position: [number, number, number];
+  lookAt: [number, number, number];
+} {
+  const [cx, cy, cz] = bounds.center;
+  const distance = bounds.radius * 0.9;
+  return {
+    position: [cx + distance * 0.3, cy + distance * 0.15, cz + distance],
+    lookAt: [cx, cy, cz],
+  };
 }
 
 export function ThreeDViewer() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  
-  // Interactive state
-  const [yaw, setYaw] = useState<number>(0.6); // Horizontal rotation
-  const [pitch, setPitch] = useState<number>(0.4); // Vertical rotation
-  const [pointSize, setPointSize] = useState<number>(1.5);
-  const [isRotating, setIsRotating] = useState<boolean>(true);
-  const [activeSensor, setActiveSensor] = useState<string>("K9-04_LIDAR");
-  const [showWireframe, setShowWireframe] = useState<boolean>(true);
-
-  // Drag-to-rotate state
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
-  const dragAngleRef = useRef<{ yaw: number; pitch: number }>({ yaw: 0.6, pitch: 0.4 });
-
-  // Generate mock point cloud static data
-  const pointsRef = useRef<Point3D[]>([]);
-  const linesRef = useRef<Line3D[]>([]);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pointCount, setPointCount] = useState<number | null>(null);
 
   useEffect(() => {
-    // Generate the 3D scene data once on mount
-    const points: Point3D[] = [];
-    const lines: Line3D[] = [];
+    const container = containerRef.current;
+    if (!container) return;
 
-    // 1. Grid Floor (Intersection)
-    const gridSize = 160;
-    const gridSpacing = 20;
-    for (let x = -gridSize; x <= gridSize; x += gridSpacing) {
-      // Lane lines along Z
-      for (let z = -gridSize; z <= gridSize; z += 5) {
-        // Road surface points (dark gray)
-        const onCrosswalk = (Math.abs(x) < 40 && Math.abs(z) > 60 && Math.abs(z) < 80);
-        const centerLine = (x === 0 || z === 0) && (Math.abs(x + z) % 15 < 8);
-        
-        let color = "rgba(255,255,255,0.08)";
-        let size = 1.0;
-        if (onCrosswalk) {
-          color = "rgba(255,255,255,0.4)";
-          size = 1.2;
-        } else if (centerLine) {
-          color = "rgba(234,88,12,0.5)"; // Signal orange centers
-          size = 1.3;
+    let disposed = false;
+    let blobUrl: string | null = null;
+    let viewer: Viewer | null = null;
+    let cleanupPly: (() => void) | null = null;
+
+    (async () => {
+      try {
+        if (RENDER_MODE === "ply") {
+          const [THREE, plyMod, orbitMod, res] = await Promise.all([
+            import("three"),
+            import("three/examples/jsm/loaders/PLYLoader.js"),
+            import("three/examples/jsm/controls/OrbitControls.js"),
+            fetch(PLY_URL),
+          ]);
+          if (!res.ok) throw new Error(`Failed to fetch ply: ${res.status}`);
+
+          const buffer = await res.arrayBuffer();
+          if (disposed) return;
+
+          const loader = new plyMod.PLYLoader();
+          const geometry = loader.parse(buffer);
+          geometry.computeBoundingSphere();
+
+          const posAttr = geometry.getAttribute("position");
+          const bounds = estimatePositionBounds(posAttr.array as Float32Array);
+          const placement = computeCameraPlacement(bounds);
+
+          const scene = new THREE.Scene();
+          const width = container.clientWidth || 1;
+          const height = container.clientHeight || 1;
+
+          const camera = new THREE.PerspectiveCamera(
+            60,
+            width / height,
+            0.01,
+            Math.max(bounds.radius * 50, 100)
+          );
+          camera.position.set(placement.position[0], placement.position[1], placement.position[2]);
+          camera.lookAt(placement.lookAt[0], placement.lookAt[1], placement.lookAt[2]);
+
+          const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+          renderer.setPixelRatio(window.devicePixelRatio);
+          renderer.setSize(width, height);
+          renderer.setClearColor(0x000000, 1);
+          container.appendChild(renderer.domElement);
+
+          const material = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: Math.max(bounds.radius * 0.004, 0.005),
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.95,
+            depthWrite: false,
+          });
+          const points = new THREE.Points(geometry, material);
+
+          const group = new THREE.Group();
+          group.add(points);
+          group.rotation.y = Math.random() * Math.PI * 2;
+          scene.add(group);
+
+          const controls = new orbitMod.OrbitControls(camera, renderer.domElement);
+          controls.enablePan = false;
+          controls.enableRotate = true;
+          controls.enableZoom = true;
+          controls.enableDamping = true;
+          controls.dampingFactor = 0.05;
+          controls.target.set(placement.lookAt[0], placement.lookAt[1], placement.lookAt[2]);
+          controls.update();
+
+          const ro = new ResizeObserver(() => {
+            const w = container.clientWidth || 1;
+            const h = container.clientHeight || 1;
+            renderer.setSize(w, h);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+          });
+          ro.observe(container);
+
+          let rafId = 0;
+          const animate = () => {
+            if (disposed) return;
+            rafId = requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+          };
+
+          cleanupPly = () => {
+            cancelAnimationFrame(rafId);
+            ro.disconnect();
+            controls.dispose();
+            geometry.dispose();
+            material.dispose();
+            renderer.dispose();
+            if (renderer.domElement.parentNode === container) {
+              container.removeChild(renderer.domElement);
+            }
+          };
+
+          setPointCount(posAttr.count);
+          animate();
+          setLoading(false);
+          return;
         }
-        points.push({ x, y: 0, z, color, size });
+
+        if (RENDER_MODE === "splat") {
+          const [GaussianSplats3D, splatRes] = await Promise.all([
+            import("@mkkellogg/gaussian-splats-3d"),
+            fetch(SPLAT_URL),
+          ]);
+          if (!splatRes.ok) throw new Error(`Failed to fetch splat: ${splatRes.status}`);
+
+          const splatBuffer = await splatRes.arrayBuffer();
+          const bounds = estimateSplatBounds(splatBuffer);
+          const placement = computeCameraPlacement(bounds);
+          blobUrl = URL.createObjectURL(
+            new Blob([splatBuffer], { type: "application/octet-stream" })
+          );
+
+          if (disposed) return;
+
+          viewer = new GaussianSplats3D.Viewer({
+            rootElement: container,
+            useBuiltInControls: true,
+            selfDrivenMode: true,
+            sharedMemoryForWorkers: false,
+            gpuAcceleratedSort: false,
+            sceneRevealMode: GaussianSplats3D.SceneRevealMode.Instant,
+            logLevel: GaussianSplats3D.LogLevel.None,
+            initialCameraPosition: placement.position,
+            initialCameraLookAt: placement.lookAt,
+          });
+
+          await viewer.addSplatScene(blobUrl, {
+            showLoadingUI: false,
+            splatAlphaRemovalThreshold: 1,
+            format: GaussianSplats3D.SceneFormat.Splat,
+          });
+
+          if (disposed) {
+            await viewer.dispose();
+            return;
+          }
+
+          const controls = viewer.controls;
+          if (controls) {
+            controls.enablePan = false;
+            controls.enableRotate = true;
+            controls.enableZoom = true;
+            controls.enableDamping = true;
+            controls.target.set(
+              placement.lookAt[0],
+              placement.lookAt[1],
+              placement.lookAt[2]
+            );
+            controls.update();
+          }
+
+          viewer.camera.position.set(
+            placement.position[0],
+            placement.position[1],
+            placement.position[2]
+          );
+          viewer.camera.lookAt(
+            placement.lookAt[0],
+            placement.lookAt[1],
+            placement.lookAt[2]
+          );
+          viewer.camera.updateProjectionMatrix?.();
+
+          setPointCount(viewer.getSplatMesh()?.getSplatCount?.() ?? null);
+          viewer.start();
+          setLoading(false);
+        }
+      } catch {
+        if (!disposed) {
+          setError("Failed to load 3D reconstruction");
+          setLoading(false);
+        }
       }
-    }
+    })();
 
-    // Helper to generate a 3D wireframe car box
-    const createCar = (cx: number, cy: number, cz: number, length: number, width: number, height: number, color: string, rotationRad: number) => {
-      const carPoints: Point3D[] = [];
-      const halfL = length / 2;
-      const halfW = width / 2;
-
-      // 8 corners of the car body bounding box
-      const corners = [
-        { x: -halfW, y: 0, z: -halfL },
-        { x: halfW, y: 0, z: -halfL },
-        { x: halfW, y: 0, z: halfL },
-        { x: -halfW, y: 0, z: halfL },
-        { x: -halfW, y: height, z: -halfL },
-        { x: halfW, y: height, z: -halfL },
-        { x: halfW, y: height, z: halfL },
-        { x: -halfW, y: height, z: halfL },
-      ];
-
-      // Rotate corners and translate
-      const cosR = Math.cos(rotationRad);
-      const sinR = Math.sin(rotationRad);
-
-      const rotatedCorners = corners.map((c) => {
-        const rx = c.x * cosR - c.z * sinR;
-        const rz = c.x * sinR + c.z * cosR;
-        return {
-          x: rx + cx,
-          y: c.y + cy,
-          z: rz + cz,
-          color,
-          size: 2.0
-        };
-      });
-
-      // Add corners to points list
-      carPoints.push(...rotatedCorners);
-
-      // Create wireframe outlines
-      const connect = (i: number, j: number) => {
-        lines.push({ p1: rotatedCorners[i], p2: rotatedCorners[j], color, width: 1.2 });
-      };
-
-      // Bottom box
-      connect(0, 1); connect(1, 2); connect(2, 3); connect(3, 0);
-      // Top box
-      connect(4, 5); connect(5, 6); connect(6, 7); connect(7, 4);
-      // Vertical pillars
-      connect(0, 4); connect(1, 5); connect(2, 6); connect(3, 7);
-
-      // Fill car interior with points (surface scan points)
-      for (let i = 0; i < 400; i++) {
-        const px = (Math.random() - 0.5) * width;
-        const py = Math.random() * height;
-        const pz = (Math.random() - 0.5) * length;
-
-        // Rotate and translate
-        const rx = px * cosR - pz * sinR;
-        const rz = px * sinR + pz * cosR;
-
-        // Add some noise to simulate lidar reflection
-        const noise = (Math.random() - 0.5) * 0.4;
-
-        points.push({
-          x: rx + cx + noise,
-          y: py + cy + noise,
-          z: rz + cz + noise,
-          color: color.replace("1.0", "0.4").replace("0.8", "0.3"),
-          size: 1.2
-        });
+    return () => {
+      disposed = true;
+      if (cleanupPly) cleanupPly();
+      if (viewer) {
+        viewer.stop?.();
+        void viewer.dispose?.();
       }
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-
-    // 2. Spawn 2 Crashed Vehicles
-    // Car A (Sedan) - positioned diagonally crashed
-    createCar(15, 0, 10, 36, 18, 14, "rgba(234,88,12,0.85)", Math.PI / 6); // Glowing orange accent
-    // Car B (SUV) - side impact
-    createCar(-18, 0, -2, 40, 20, 18, "rgba(59,130,246,0.85)", -Math.PI / 4); // Cyan/blue accent
-
-    // 3. Scattered Debris points around the crash center (glowing small particles)
-    for (let i = 0; i < 80; i++) {
-      const radius = 25 * Math.sqrt(Math.random());
-      const angle = Math.random() * Math.PI * 2;
-      const x = radius * Math.cos(angle);
-      const z = radius * Math.sin(angle);
-      const y = Math.random() * 1.5; // low to the ground
-      
-      points.push({
-        x,
-        y,
-        z,
-        color: Math.random() > 0.4 ? "rgba(239,68,68,0.7)" : "rgba(253,224,71,0.7)", // Red/yellow debris
-        size: 2.0
-      });
-    }
-
-    pointsRef.current = points;
-    linesRef.current = lines;
   }, []);
 
-  // Frame animation loop
-  useEffect(() => {
-    let animationFrameId: number;
-
-    const drawScene = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      const width = canvas.width;
-      const height = canvas.height;
-      ctx.clearRect(0, 0, width, height);
-
-      // Deep grid space background
-      ctx.fillStyle = "#020202";
-      ctx.fillRect(0, 0, width, height);
-
-      // 3D parameters
-      const centerX = width / 2;
-      const centerY = height / 2;
-      const distance = 250;
-      const scale = 260; // Focal length
-
-      const cosY = Math.cos(yaw);
-      const sinY = Math.sin(yaw);
-      const cosP = Math.cos(pitch);
-      const sinP = Math.sin(pitch);
-
-      // Projection function
-      const project = (p: Point3D) => {
-        // 1. Rotate Y (Yaw)
-        const rx1 = p.x * cosY - p.z * sinY;
-        const rz1 = p.x * sinY + p.z * cosY;
-
-        // 2. Rotate X (Pitch)
-        const ry2 = p.y * cosP - rz1 * sinP;
-        const rz2 = p.y * sinP + rz1 * cosP;
-
-        // 3. Perspective Projection
-        const factor = scale / (rz2 + distance);
-        const px = centerX + rx1 * factor;
-        const py = centerY - ry2 * factor; // negative because screen Y is downward
-
-        return {
-          x: px,
-          y: py,
-          depth: rz2,
-          visible: rz2 + distance > 10 // clip points too close
-        };
-      };
-
-      // Sort points by depth for painters algorithm (back-to-front rendering)
-      const projectedPoints = pointsRef.current
-        .map((p) => ({ original: p, proj: project(p) }))
-        .filter((p) => p.proj.visible);
-
-      projectedPoints.sort((a, b) => b.proj.depth - a.proj.depth);
-
-      // Draw grid floor first
-      projectedPoints.forEach(({ original, proj }) => {
-        // Only draw grid floor particles if below certain height
-        if (original.y === 0) {
-          ctx.fillStyle = original.color;
-          ctx.fillRect(proj.x - (original.size * pointSize)/2, proj.y - (original.size * pointSize)/2, original.size * pointSize, original.size * pointSize);
-        }
-      });
-
-      // Draw Wireframe Lines if toggled
-      if (showWireframe) {
-        linesRef.current.forEach((line) => {
-          const p1 = project(line.p1);
-          const p2 = project(line.p2);
-
-          if (p1.visible && p2.visible) {
-            ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = line.color;
-            ctx.lineWidth = line.width;
-            ctx.stroke();
-          }
-        });
-      }
-
-      // Draw car hull points and debris points on top
-      projectedPoints.forEach(({ original, proj }) => {
-        if (original.y > 0) {
-          ctx.fillStyle = original.color;
-          ctx.beginPath();
-          ctx.arc(proj.x, proj.y, original.size * pointSize * 0.7, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      // Drawing Lidar Scan crosshair ring (radar effect overlay)
-      ctx.strokeStyle = "rgba(234, 88, 12, 0.25)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, 130, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Crosshairs HUD
-      ctx.strokeStyle = "rgba(255,255,255,0.06)";
-      ctx.beginPath();
-      ctx.moveTo(centerX - 160, centerY); ctx.lineTo(centerX - 100, centerY);
-      ctx.moveTo(centerX + 100, centerY); ctx.lineTo(centerX + 160, centerY);
-      ctx.moveTo(centerX, centerY - 100); ctx.lineTo(centerX, centerY - 60);
-      ctx.moveTo(centerX, centerY + 60); ctx.lineTo(centerX, centerY + 100);
-      ctx.stroke();
-    };
-
-    const animate = () => {
-      if (isRotating && !dragStartRef.current) {
-        setYaw((prev) => (prev + 0.003) % (Math.PI * 2));
-      }
-      drawScene();
-      animationFrameId = requestAnimationFrame(animate);
-    };
-
-    animationFrameId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [yaw, pitch, pointSize, isRotating, showWireframe]);
-
-  // Mouse Drag interaction
-  const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
-    dragStartRef.current = { x: e.clientX, y: e.clientY };
-    dragAngleRef.current = { yaw, pitch };
-    setIsRotating(false); // Stop auto rotate while dragging
-  };
-
-  const handleMouseMove = (e: MouseEvent<HTMLCanvasElement>) => {
-    if (!dragStartRef.current) return;
-    
-    const dx = e.clientX - dragStartRef.current.x;
-    const dy = e.clientY - dragStartRef.current.y;
-    
-    // Scale motion to angle delta
-    const nextYaw = (dragAngleRef.current.yaw - dx * 0.007) % (Math.PI * 2);
-    const nextPitch = Math.max(-Math.PI/3, Math.min(Math.PI/3, dragAngleRef.current.pitch + dy * 0.007));
-    
-    setYaw(nextYaw);
-    setPitch(nextPitch);
-  };
-
-  const handleMouseUp = () => {
-    dragStartRef.current = null;
-  };
+  const pointLabel =
+    pointCount !== null ? pointCount.toLocaleString() : "—";
+  const formatLabel = RENDER_MODE === "ply" ? "PLY POINT CLOUD" : "GAUSSIAN SPLAT";
+  const loadingLabel =
+    RENDER_MODE === "ply"
+      ? "Loading point cloud reconstruction..."
+      : "Loading Gaussian splat reconstruction...";
 
   return (
     <div className="relative border border-white/10 bg-black/90 p-4 font-mono select-none overflow-hidden rounded-sm">
-      {/* 3D HUD Indicators */}
       <div className="flex items-center justify-between border-b border-white/10 pb-3 text-[10px] tracking-wider text-white/50">
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-gc-accent animate-pulse" />
-          <select 
-            value={activeSensor} 
-            onChange={(e) => setActiveSensor(e.target.value)}
-            className="bg-transparent text-white border border-white/10 px-2 py-0.5 rounded-none font-mono text-[9px] focus:outline-none"
-          >
-            <option value="K9-04_LIDAR" className="bg-black">K9-04_LIDAR (ACTIVE)</option>
-            <option value="CCTV_042_CAMERA" className="bg-black">CCTV_042 (SOLVED)</option>
-            <option value="ORBIT_OVERLAY" className="bg-black">GRID_ORTHO_RECON</option>
-          </select>
+          <span className="bg-transparent text-white border border-white/10 px-2 py-0.5 rounded-none font-mono text-[9px]">
+            K9-04_LIDAR (ACTIVE)
+          </span>
         </div>
-        <div>POINTS: 24,904 // CONFIDENCE: 99.8%</div>
+        <div>
+          POINTS: {pointLabel}
+          {" // CONFIDENCE: 99.8%"}
+        </div>
       </div>
 
-      {/* Main 3D Canvas Viewport */}
-      <div className="relative mt-3 cursor-grab active:cursor-grabbing border border-white/5">
-        <canvas
-          ref={canvasRef}
-          width={600}
-          height={320}
-          className="w-full bg-[#020202] aspect-[1.85/1]"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+      <div className="relative mt-3 border border-white/5 overflow-hidden">
+        <div
+          ref={containerRef}
+          className="w-full bg-[#020202] aspect-[1.85/1] min-h-[200px]"
         />
-        
-        {/* Help label overlay */}
+
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#020202]/90 pointer-events-none">
+            <span className="text-[9px] uppercase tracking-widest text-white/40 animate-pulse">
+              {loadingLabel}
+            </span>
+          </div>
+        )}
+
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#020202]/95 pointer-events-none">
+            <span className="text-[9px] uppercase tracking-widest text-gc-accent">{error}</span>
+          </div>
+        )}
+
         <div className="absolute bottom-2 left-2 pointer-events-none text-[8px] text-white/30 uppercase tracking-widest bg-black/75 px-1.5 py-0.5 border border-white/5">
-          {"Drag mouse to rotate reconstruction"}
+          Drag to look · Scroll to zoom
         </div>
       </div>
 
-      {/* Viewport controls panel */}
       <div className="mt-4 grid grid-cols-2 gap-4 border-t border-white/10 pt-3.5 text-[9px] uppercase tracking-widest text-white/40">
         <div className="space-y-2.5">
           <div className="flex items-center justify-between">
-            <span>POINT DENSITY:</span>
-            <input
-              type="range"
-              min="0.5"
-              max="3"
-              step="0.1"
-              value={pointSize}
-              onChange={(e) => setPointSize(parseFloat(e.target.value))}
-              className="w-24 accent-gc-accent cursor-pointer bg-white/10 rounded-none h-1"
-            />
+            <span>VIEW MODE:</span>
+            <span className="text-white/70">ORBIT</span>
           </div>
           <div className="flex items-center justify-between">
-            <span>AUTO-ROTATE:</span>
-            <button
-              onClick={() => setIsRotating(!isRotating)}
-              className={`border border-white/15 px-3 py-1 font-mono text-[9px] transition-colors ${
-                isRotating ? "bg-white text-black font-semibold border-white" : "text-white hover:bg-white/5"
-              }`}
-            >
-              {isRotating ? "ON" : "OFF"}
-            </button>
+            <span>INTERACTION:</span>
+            <span className="text-white/70">MOUSE (LOOK + ZOOM)</span>
           </div>
         </div>
 
         <div className="space-y-2.5 pl-4 border-l border-white/10">
           <div className="flex items-center justify-between">
-            <span>WIREFRAME MODEL:</span>
-            <button
-              onClick={() => setShowWireframe(!showWireframe)}
-              className={`border border-white/15 px-3 py-1 font-mono text-[9px] transition-colors ${
-                showWireframe ? "bg-white text-black font-semibold border-white" : "text-white hover:bg-white/5"
-              }`}
-            >
-              {showWireframe ? "SHOW" : "HIDE"}
-            </button>
+            <span>FORMAT:</span>
+            <span className="text-white/70">{formatLabel}</span>
           </div>
           <div className="flex items-center justify-between text-white/30">
-            <span>COORD SHIFT:</span>
-            <span>[X:0.24 Y:0.00 Z:-0.19]</span>
+            <span>CAMERA:</span>
+            <span>ORBIT / CENTERED</span>
           </div>
         </div>
       </div>
