@@ -7,6 +7,7 @@ import { Incident } from "@/lib/incidents";
 import { mapIncidentReportToDashboardIncident } from "@/lib/incidents";
 import { getIncidentById, getCachedIncident, getCachedEconomics, computeEconomics, buildEconomicsRequest } from "@/lib/api";
 import { ThreeDViewer } from "@/components/dashboard/ThreeDViewer";
+import { DEMO_INCIDENT_ID, DEMO_PLY_URL, getDemoIncident } from "@/lib/demoScene";
 import { ArrowLeft, Move, RefreshCw } from "lucide-react";
 
 // Position data interface for canvas widgets
@@ -21,11 +22,13 @@ export default function IncidentDetailsPage() {
   const id = decodeURIComponent(rawId);
 
   const [incident, setIncident] = useState<Incident | null>(() => {
+    if (id === DEMO_INCIDENT_ID) return getDemoIncident();
     const cached = getCachedIncident(id);
     const economics = getCachedEconomics(id);
     return cached && economics ? mapIncidentReportToDashboardIncident(cached, economics) : null;
   });
   const [fetchDone, setFetchDone] = useState(() => {
+    if (id === DEMO_INCIDENT_ID) return true;
     const cached = getCachedIncident(id);
     const economics = getCachedEconomics(id);
     return !!(cached && economics);
@@ -66,6 +69,15 @@ export default function IncidentDetailsPage() {
     let cancelled = false;
 
     async function loadIncident() {
+      // Demo incident bypasses the API entirely
+      if (id === DEMO_INCIDENT_ID) {
+        if (!cancelled) {
+          setIncident(getDemoIncident());
+          setFetchDone(true);
+        }
+        return;
+      }
+
       const cachedReport = getCachedIncident(id);
       const cachedEconomics = getCachedEconomics(id);
       if (!cachedReport || !cachedEconomics) {
@@ -324,11 +336,11 @@ export default function IncidentDetailsPage() {
           </div>
 
           <div className="p-3">
-            <div className="relative aspect-[16/9] w-full border border-white/5 overflow-hidden bg-zinc-950">
+            <div className="relative mx-auto w-fit max-w-full border border-white/5 overflow-hidden bg-zinc-950">
               <img
                 src={incident.cctvImage}
                 alt="Accident CCTV snapshot"
-                className="h-full w-full object-cover opacity-80"
+                className="block h-auto max-h-[280px] w-auto max-w-full opacity-80"
                 draggable={false}
               />
               {/* Scanlines overlay effect */}
@@ -372,11 +384,11 @@ export default function IncidentDetailsPage() {
           </div>
 
           <div className="p-3">
-            <div className="relative aspect-[16/9] w-full border border-white/5 overflow-hidden bg-zinc-950">
+            <div className="relative mx-auto w-fit max-w-full border border-white/5 overflow-hidden bg-zinc-950">
               <img
                 src={incident.robodogImages[activeScoutPhotoIndex]}
                 alt={`Robodog scan ${activeScoutPhotoIndex + 1}`}
-                className="h-full w-full object-cover opacity-85"
+                className="block h-auto max-h-[280px] w-auto max-w-full opacity-85"
                 draggable={false}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
@@ -393,11 +405,11 @@ export default function IncidentDetailsPage() {
                 <button
                   key={idx}
                   onClick={() => setActiveScoutPhotoIndex(idx)}
-                  className={`relative aspect-[16/10] border overflow-hidden transition-all ${
+                  className={`relative aspect-[16/10] border overflow-hidden transition-all flex items-center justify-center bg-zinc-950 ${
                     idx === activeScoutPhotoIndex ? "border-gc-accent scale-[1.02]" : "border-white/10 hover:border-white/30"
                   }`}
                 >
-                  <img src={img} alt="" className="h-full w-full object-cover" draggable={false} />
+                  <img src={img} alt="" className="max-h-full max-w-full object-contain" draggable={false} />
                   <div className="absolute bottom-1 right-1 text-[7px] bg-black/80 border border-white/5 px-1 font-mono text-white/40">
                     S.0{idx + 1}
                   </div>
@@ -427,7 +439,7 @@ export default function IncidentDetailsPage() {
           </div>
 
           <div className="p-3">
-            <ThreeDViewer />
+            <ThreeDViewer plyUrl={id === DEMO_INCIDENT_ID ? DEMO_PLY_URL : undefined} />
           </div>
         </div>
 

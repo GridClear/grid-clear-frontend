@@ -8,7 +8,7 @@ const RENDER_MODE: RenderMode = "ply";
 
 const SPLAT_URL = "/incident-reconstruction.splat";
 const SPLAT_STRIDE = 32;
-const PLY_URL = "/scene.ply";
+const DEFAULT_PLY_URL = "/scene.ply";
 
 interface SceneBounds {
   center: [number, number, number];
@@ -116,7 +116,7 @@ function computeCameraPlacement(bounds: SceneBounds): {
   };
 }
 
-export function ThreeDViewer() {
+export function ThreeDViewer({ plyUrl = DEFAULT_PLY_URL }: { plyUrl?: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +138,7 @@ export function ThreeDViewer() {
             import("three"),
             import("three/examples/jsm/loaders/PLYLoader.js"),
             import("three/examples/jsm/controls/OrbitControls.js"),
-            fetch(PLY_URL),
+            fetch(plyUrl),
           ]);
           if (!res.ok) throw new Error(`Failed to fetch ply: ${res.status}`);
 
@@ -317,7 +317,7 @@ export function ThreeDViewer() {
       }
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, []);
+  }, [plyUrl]);
 
   const pointLabel =
     pointCount !== null ? pointCount.toLocaleString() : "—";

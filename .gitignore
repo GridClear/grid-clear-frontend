@@ -31,6 +31,12 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Large 3D assets — hosted externally, not committed to git
+public/demoAssets/*.ply
+public/demoAssets/*.splat
+public/*.ply
+public/*.splat
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

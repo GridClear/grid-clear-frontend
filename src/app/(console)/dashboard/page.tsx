@@ -7,11 +7,16 @@ import { Incident } from "@/lib/incidents";
 import { mapIncidentReportToDashboardIncident } from "@/lib/incidents";
 import { InteractiveMap } from "@/components/dashboard/InteractiveMap";
 import { healthCheck, listIncidents, getCachedIncidents, getCachedEconomics, enrichReportsWithEconomics, deduplicateIncidentReports } from "@/lib/api";
-import { incidents as mockIncidents } from "@/content/incidents";
+import { getDemoIncident, DEMO_INCIDENT_ID } from "@/lib/demoScene";
 
 type BackendStatus = "checking" | "ok" | "error";
 
 const INCIDENT_LIST_LIMIT = 5;
+
+/** Always keeps the demo incident pinned at the top, deduplicating if already present. */
+function pinDemo(list: Incident[]): Incident[] {
+  return [getDemoIncident(), ...list.filter((i) => i.id !== DEMO_INCIDENT_ID)];
+}
 
 function getInitialIncidents(): { incidents: Incident[]; fromCache: boolean } {
   const cached = getCachedIncidents(INCIDENT_LIST_LIMIT);
@@ -20,14 +25,16 @@ function getInitialIncidents(): { incidents: Incident[]; fromCache: boolean } {
     const allHaveEconomics = deduped.every((r) => getCachedEconomics(r.incident_id));
     if (allHaveEconomics) {
       return {
-        incidents: deduped.map((r) =>
-          mapIncidentReportToDashboardIncident(r, getCachedEconomics(r.incident_id))
+        incidents: pinDemo(
+          deduped.map((r) =>
+            mapIncidentReportToDashboardIncident(r, getCachedEconomics(r.incident_id))
+          )
         ),
         fromCache: true,
       };
     }
   }
-  return { incidents: [], fromCache: false };
+  return { incidents: pinDemo([]), fromCache: false };
 }
 
 export default function DashboardPage() {
@@ -37,7 +44,9 @@ export default function DashboardPage() {
   const [incidentsError, setIncidentsError] = useState(false);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
 
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(
+    () => initial.incidents[0] ?? getDemoIncident()
+  );
 
   const durationMinutes = selectedIncident?.economics?.incident.duration_minutes ?? 90;
   const totalClosureCost =
@@ -56,8 +65,9 @@ export default function DashboardPage() {
     listIncidents({ limit: INCIDENT_LIST_LIMIT })
       .then(async (reports) => {
         if (reports.length === 0) {
-          setIncidents(mockIncidents as Incident[]);
-          if (mockIncidents.length > 0) setSelectedIncident(mockIncidents[0] as Incident);
+          const list = pinDemo([]);
+          setIncidents(list);
+          setSelectedIncident((prev) => prev ?? list[0]);
           return;
         }
 
@@ -65,14 +75,16 @@ export default function DashboardPage() {
         const enriched = reports.map((r) =>
           mapIncidentReportToDashboardIncident(r, economicsMap.get(r.incident_id))
         );
-        setIncidents(enriched);
+        const pinned = pinDemo(enriched);
+        setIncidents(pinned);
         setSelectedIncident((prev) =>
-          prev ? (enriched.find((i) => i.id === prev.id) ?? enriched[0]) : enriched[0]
+          prev ? (pinned.find((i) => i.id === prev.id) ?? pinned[0]) : pinned[0]
         );
       })
       .catch(() => {
-        setIncidents(mockIncidents as Incident[]);
-        if (mockIncidents.length > 0) setSelectedIncident(mockIncidents[0] as Incident);
+        const list = pinDemo([]);
+        setIncidents(list);
+        setSelectedIncident((prev) => prev ?? list[0]);
         setIncidentsError(true);
       })
       .finally(() => setIncidentsLoading(false));
@@ -129,7 +141,10 @@ export default function DashboardPage() {
 
               let statusPill = "bg-gc-accent/10 text-gc-accent border-gc-accent/20";
               let dotColor = "bg-gc-accent";
-              if (incident.status === "Cleared") {
+              if (incident.id === DEMO_INCIDENT_ID) {
+                statusPill = "bg-red-500/10 text-red-400 border-red-500/20";
+                dotColor = "bg-[#ef4444]";
+              } else if (incident.status === "Cleared") {
                 statusPill = "bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20";
                 dotColor = "bg-[#10b981]";
               } else if (incident.status === "Ready for Review") {

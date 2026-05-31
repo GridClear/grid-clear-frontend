@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Incident } from "@/lib/incidents";
+import { DEMO_INCIDENT_ID } from "@/lib/demoScene";
 
 interface InteractiveMapProps {
   incidents: Incident[];
@@ -52,7 +53,10 @@ export function InteractiveMap({
           let pingColor = "bg-gc-accent";
           let ringColor = "border-gc-accent";
           
-          if (incident.status === "Cleared") {
+          if (incident.id === DEMO_INCIDENT_ID) {
+            pingColor = "bg-[#ef4444]";
+            ringColor = "border-[#ef4444]";
+          } else if (incident.status === "Cleared") {
             pingColor = "bg-[#10b981]";
             ringColor = "border-[#10b981]";
           } else if (incident.status === "Ready for Review") {
@@ -78,7 +82,7 @@ export function InteractiveMap({
               }`} />
 
               {/* Inner glowing dot */}
-              <div className={`relative h-2.5 w-2.5 rounded-full ${pingColor} transition-transform duration-200 group-hover:scale-125 shadow-[0_0_8px_rgba(234,88,12,0.6)]`} />
+              <div className={`relative h-2.5 w-2.5 rounded-full ${pingColor} transition-transform duration-200 group-hover:scale-125 ${incident.id === DEMO_INCIDENT_ID ? "shadow-[0_0_8px_rgba(239,68,68,0.7)]" : "shadow-[0_0_8px_rgba(234,88,12,0.6)]"}`} />
 
               {/* Location Tag Tagline / HUD label */}
               <div className="absolute left-4 top-1/2 -translate-y-1/2 whitespace-nowrap bg-[#0a0a0c]/90 border border-white/10 px-2 py-1 text-[8px] font-mono tracking-widest text-white/60 pointer-events-none select-none transition-opacity duration-200 opacity-0 group-hover:opacity-100">
