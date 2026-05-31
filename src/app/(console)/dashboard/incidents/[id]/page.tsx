@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useEffect, useRef, MouseEvent } from "react";
-import { incidents } from "@/content/incidents";
+import { Incident } from "@/lib/incidents";
+import { mapIncidentReportToDashboardIncident } from "@/lib/incidents";
+import { getIncidentById, getCachedIncident, getCachedEconomics, computeEconomics, buildEconomicsRequest } from "@/lib/api";
 import { ThreeDViewer } from "@/components/dashboard/ThreeDViewer";
 import { ArrowLeft, Move, RefreshCw } from "lucide-react";
 
@@ -15,10 +17,19 @@ interface WidgetPosition {
 
 export default function IncidentDetailsPage() {
   const params = useParams();
-  const id = params.id as string;
+  const rawId = params.id as string;
+  const id = decodeURIComponent(rawId);
 
-  // Find the incident
-  const incident = incidents.find((inc) => inc.id === id);
+  const [incident, setIncident] = useState<Incident | null>(() => {
+    const cached = getCachedIncident(id);
+    const economics = getCachedEconomics(id);
+    return cached && economics ? mapIncidentReportToDashboardIncident(cached, economics) : null;
+  });
+  const [fetchDone, setFetchDone] = useState(() => {
+    const cached = getCachedIncident(id);
+    const economics = getCachedEconomics(id);
+    return !!(cached && economics);
+  });
 
   // Layout positions for draggable widgets
   const defaultPositions = {
@@ -33,7 +44,6 @@ export default function IncidentDetailsPage() {
   const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Core Incident Live States
-  const [accruedCost, setAccruedCost] = useState<number>(0);
   const [currentStatus, setCurrentStatus] = useState<string>("Scouting");
   const [activeScoutPhotoIndex, setActiveScoutPhotoIndex] = useState<number>(0);
   const [checkedSteps, setCheckedSteps] = useState({
@@ -46,16 +56,47 @@ export default function IncidentDetailsPage() {
   const [isCleared, setIsCleared] = useState<boolean>(false);
   const [showClearanceModal, setShowClearanceModal] = useState<boolean>(false);
   const [clearanceProgress, setClearanceProgress] = useState<number>(0);
+  const [showCostBreakdown, setShowCostBreakdown] = useState<boolean>(false);
 
   // Drawing Canvas Signature Ref
   const sigCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawingSig, setIsDrawingSig] = useState<boolean>(false);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadIncident() {
+      const cachedReport = getCachedIncident(id);
+      const cachedEconomics = getCachedEconomics(id);
+      if (!cachedReport || !cachedEconomics) {
+        setFetchDone(false);
+      }
+      setShowCostBreakdown(false);
+
+      try {
+        const report = cachedReport ?? (await getIncidentById(id));
+        const economics =
+          cachedEconomics ?? (await computeEconomics(report.incident_id, buildEconomicsRequest(report)));
+        if (!cancelled) {
+          setIncident(mapIncidentReportToDashboardIncident(report, economics));
+        }
+      } catch {
+        if (!cancelled) setIncident(null);
+      } finally {
+        if (!cancelled) setFetchDone(true);
+      }
+    }
+
+    loadIncident();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
     if (!incident) return;
     setCurrentStatus(incident.status);
-    
-    // Set initial steps checked based on status
+
     if (incident.status === "Modeling") {
       setCheckedSteps({ scout: true, fusion: false, cost: false, detour: false, signed: false });
     } else if (incident.status === "Ready for Review") {
@@ -65,20 +106,15 @@ export default function IncidentDetailsPage() {
       setIsCleared(true);
     }
 
-    // Set base accrued cost based on elapsed time (22 minutes)
-    const baseCost = incident.costPerMinute * 22;
-    setAccruedCost(baseCost);
+  }, [incident]);
 
-    // Tick cost up in real-time ($ per second) if not cleared
-    const increment = incident.costPerMinute / 60;
-    const timer = setInterval(() => {
-      if (!isCleared) {
-        setAccruedCost((prev) => prev + increment);
-      }
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [incident, isCleared]);
+  if (!fetchDone) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#050506] text-white font-mono p-6">
+        <span className="text-[10px] uppercase tracking-widest text-white/40 animate-pulse">Loading incident...</span>
+      </div>
+    );
+  }
 
   if (!incident) {
     return (
@@ -124,6 +160,12 @@ export default function IncidentDetailsPage() {
   const resetLayout = () => {
     setPositions(defaultPositions);
   };
+
+  const durationMinutes = incident.economics?.incident.duration_minutes ?? 90;
+  const totalClosureCost =
+    incident.economics?.incident_totals.total_cad ??
+    Math.round(incident.costPerMinute * durationMinutes);
+  const costBreakdown = incident.economics?.incident_totals;
 
   // Step checklist toggle
   const toggleStep = (step: keyof typeof checkedSteps) => {
@@ -409,20 +451,80 @@ export default function IncidentDetailsPage() {
           </div>
 
           <div className="p-4 space-y-4">
-            {/* Real-time cost ticker */}
+            {/* Estimated closure cost */}
             <div className="bg-white/[0.02] border border-white/5 p-3 rounded-none">
               <span className="text-[8px] text-white/30 uppercase tracking-widest block">
-                {"// Real-Time Closure Loss"}
+                {`// Est. Closure Cost (${durationMinutes} min)`}
               </span>
-              <div className={`mt-1.5 text-2xl font-extrabold tracking-tight font-mono tabular-nums ${isCleared ? "text-[#10b981]" : "text-gc-accent"}`}>
-                ${accruedCost.toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2
-                })}
+              <div className="mt-1.5 flex items-start justify-between gap-3">
+                <div className={`text-2xl font-extrabold tracking-tight font-mono tabular-nums ${isCleared ? "text-[#10b981]" : "text-gc-accent"}`}>
+                  ${Math.round(totalClosureCost).toLocaleString("en-US")}
+                </div>
+                {costBreakdown && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCostBreakdown((prev) => !prev)}
+                    className="text-[8px] uppercase tracking-widest text-white/40 hover:text-gc-accent transition-colors shrink-0 mt-1"
+                  >
+                    {showCostBreakdown ? "See less" : "See more"}
+                  </button>
+                )}
               </div>
               <span className="text-[7.5px] text-white/40 block mt-1 uppercase">
-                {isCleared ? "STATUS: REOPENED // LOSS TICKER STOPPED" : `ACCUMULATOR: +$${(incident.costPerMinute / 60).toFixed(2)}/SEC`}
+                {isCleared ? "STATUS: REOPENED" : `PROJECTED ${durationMinutes}-MIN TOTAL // CAD`}
               </span>
+
+              {showCostBreakdown && costBreakdown && incident.economics && (
+                <div className="mt-3 pt-3 border-t border-white/10 space-y-2 text-[8px] uppercase tracking-wider">
+                  <span className="text-white/30 block text-[7px]">{"// Cost Breakdown"}</span>
+                  {[
+                    { label: "Primary impact", value: costBreakdown.primary_cad },
+                    { label: "Detour load", value: costBreakdown.detour_cad },
+                    { label: "Spillback", value: costBreakdown.spillback_cad },
+                  ].map((row) => (
+                    <div key={row.label} className="flex items-center justify-between text-white/55">
+                      <span>{row.label}</span>
+                      <span className="font-mono tabular-nums text-white/80">
+                        ${Math.round(row.value).toLocaleString("en-US")}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between border-t border-white/5 pt-2 font-semibold text-white/70">
+                    <span>Total</span>
+                    <span className={`font-mono tabular-nums ${isCleared ? "text-[#10b981]" : "text-gc-accent"}`}>
+                      ${Math.round(costBreakdown.total_cad).toLocaleString("en-US")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-white/45">
+                    <span>Confidence range</span>
+                    <span className="font-mono tabular-nums">
+                      ${Math.round(costBreakdown.low_cad).toLocaleString("en-US")} – ${Math.round(costBreakdown.high_cad).toLocaleString("en-US")}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 pt-2 border-t border-white/5 text-white/45">
+                    <div>
+                      <span className="block text-[7px] text-white/30">Capacity loss</span>
+                      <span className="text-white/70">{incident.economics.incident.capacity_loss_pct.toFixed(1)}%</span>
+                    </div>
+                    <div>
+                      <span className="block text-[7px] text-white/30">Lanes blocked</span>
+                      <span className="text-white/70">
+                        {incident.economics.incident.lanes_blocked} / {incident.economics.incident.total_lanes}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block text-[7px] text-white/30">Rate</span>
+                      <span className="text-white/70">
+                        ${Math.round(incident.economics.cost_per_minute_cad).toLocaleString("en-US")}/min
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block text-[7px] text-white/30">Duration</span>
+                      <span className="text-white/70">{incident.economics.incident.duration_minutes} min</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Steps checklist */}
