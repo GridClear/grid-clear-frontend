@@ -1,4 +1,4 @@
-import { IncidentReport, resolveApiUrl } from "./api";
+import { ClearanceEconomics, IncidentReport, resolveApiUrl } from "./api";
 
 export interface Incident {
   id: string;
@@ -14,6 +14,8 @@ export interface Incident {
   robodogImages: string[];
   /** ISO timestamp from backend — absent on mock/fallback data */
   firstSeenAt?: string;
+  /** Full economics payload when computed by the cost engine */
+  economics?: ClearanceEconomics;
 }
 
 // Toronto bounding box used by the map ("43.6532° N, 79.3832° W")
@@ -49,7 +51,10 @@ const COST_BY_SEVERITY: Record<string, number> = {
   PROPERTY: 3250,
 };
 
-export function mapIncidentReportToDashboardIncident(report: IncidentReport): Incident {
+export function mapIncidentReportToDashboardIncident(
+  report: IncidentReport,
+  economics?: ClearanceEconomics
+): Incident {
   const overlayUrl = resolveApiUrl(report.overlay_url);
   const fallbackImage = "/cctv_king_bloor.png";
 
@@ -73,13 +78,14 @@ export function mapIncidentReportToDashboardIncident(report: IncidentReport): In
     intersection: report.intersection,
     timestamp: formatTime(report.first_seen_at),
     status,
-    costPerMinute: COST_BY_SEVERITY[report.severity] ?? 3250,
-    projectedDuration: "90 min",
+    costPerMinute: economics?.cost_per_minute_cad ?? COST_BY_SEVERITY[report.severity] ?? 3250,
+    projectedDuration: economics ? `${economics.incident.duration_minutes} min` : "90 min",
     x: lonToX(report.location.lon),
     y: latToY(report.location.lat),
     description,
     cctvImage,
     robodogImages,
     firstSeenAt: report.first_seen_at,
+    economics,
   };
 }

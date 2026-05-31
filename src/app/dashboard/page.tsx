@@ -6,7 +6,7 @@ import { Logo } from "@/components/ui/Logo";
 import { Incident } from "@/lib/incidents";
 import { mapIncidentReportToDashboardIncident } from "@/lib/incidents";
 import { InteractiveMap } from "@/components/dashboard/InteractiveMap";
-import { healthCheck, listIncidents, getCachedIncidents } from "@/lib/api";
+import { healthCheck, listIncidents, getCachedIncidents, getCachedEconomics, enrichReportsWithEconomics } from "@/lib/api";
 import { incidents as mockIncidents } from "@/content/incidents";
 
 type BackendStatus = "checking" | "ok" | "error";
@@ -16,10 +16,15 @@ const INCIDENT_LIST_LIMIT = 5;
 function getInitialIncidents(): { incidents: Incident[]; fromCache: boolean } {
   const cached = getCachedIncidents(INCIDENT_LIST_LIMIT);
   if (cached && cached.length > 0) {
-    return {
-      incidents: cached.map(mapIncidentReportToDashboardIncident),
-      fromCache: true,
-    };
+    const allHaveEconomics = cached.every((r) => getCachedEconomics(r.incident_id));
+    if (allHaveEconomics) {
+      return {
+        incidents: cached.map((r) =>
+          mapIncidentReportToDashboardIncident(r, getCachedEconomics(r.incident_id))
+        ),
+        fromCache: true,
+      };
+    }
   }
   return { incidents: [], fromCache: false };
 }
@@ -34,9 +39,6 @@ export default function DashboardPage() {
   );
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
 
-  // Real-time ticking cost accumulator state
-  const [accruedCost, setAccruedCost] = useState<number>(0);
-
   useEffect(() => {
     healthCheck()
       .then((health) => {
@@ -46,17 +48,22 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const cached = getCachedIncidents(INCIDENT_LIST_LIMIT);
-    if (cached && cached.length > 0) return;
-
     listIncidents({ limit: INCIDENT_LIST_LIMIT })
-      .then((reports) => {
-        const mapped =
-          reports.length > 0
-            ? reports.map(mapIncidentReportToDashboardIncident)
-            : (mockIncidents as Incident[]);
-        setIncidents(mapped);
-        if (mapped.length > 0) setSelectedIncident(mapped[0]);
+      .then(async (reports) => {
+        if (reports.length === 0) {
+          setIncidents(mockIncidents as Incident[]);
+          if (mockIncidents.length > 0) setSelectedIncident(mockIncidents[0] as Incident);
+          return;
+        }
+
+        const economicsMap = await enrichReportsWithEconomics(reports);
+        const enriched = reports.map((r) =>
+          mapIncidentReportToDashboardIncident(r, economicsMap.get(r.incident_id))
+        );
+        setIncidents(enriched);
+        setSelectedIncident((prev) =>
+          prev ? (enriched.find((i) => i.id === prev.id) ?? enriched[0]) : enriched[0]
+        );
       })
       .catch(() => {
         setIncidents(mockIncidents as Incident[]);
@@ -65,25 +72,6 @@ export default function DashboardPage() {
       })
       .finally(() => setIncidentsLoading(false));
   }, []);
-
-  // Update accrued cost when selected incident changes or over time
-  useEffect(() => {
-    if (!selectedIncident) return;
-
-    // Use real elapsed time when available (real incidents), else default to 22 min (mock fallback)
-    const elapsedMin = selectedIncident.firstSeenAt
-      ? Math.max(0, (Date.now() - new Date(selectedIncident.firstSeenAt).getTime()) / 60_000)
-      : 22;
-    const baseCost = selectedIncident.costPerMinute * elapsedMin;
-    setAccruedCost(baseCost);
-
-    const increment = selectedIncident.costPerMinute / 60;
-    const timer = setInterval(() => {
-      setAccruedCost((prev) => prev + increment);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [selectedIncident]);
 
   const activeCount = incidents.filter((i) => i.status !== "Cleared").length;
 
@@ -237,20 +225,17 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              {/* Cost Ticker & Detailed Workspace Link */}
+              {/* Estimated Cost & Detailed Workspace Link */}
               <div className="border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6 flex flex-col justify-between">
                 <div>
                   <span className="text-[8px] text-white/30 uppercase tracking-widest block select-none">
-                    {"// Real-Time Accrued Loss"}
+                    {"// Est. Closure Cost (90 min)"}
                   </span>
                   <div className="mt-2 text-2xl md:text-3xl font-extrabold text-gc-accent font-mono tracking-tight tabular-nums">
-                    ${accruedCost.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    })}
+                    ${Math.round(selectedIncident.costPerMinute * 90).toLocaleString("en-US")}
                   </div>
                   <span className="text-[8px] text-white/40 block mt-1">
-                    CHARGING STATS: +${(selectedIncident.costPerMinute / 60).toFixed(2)}/SEC
+                    PROJECTED 90-MIN TOTAL // CAD
                   </span>
                 </div>
 

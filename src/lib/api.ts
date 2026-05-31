@@ -39,12 +39,113 @@ export interface GeoPoint {
   lon: number;
 }
 
+export interface LanesBlocked {
+  direction: string;
+  lane_numbers: number[];
+  confidence: number;
+}
+
 export interface SceneFindings {
   scene_summary: string;
   briefing?: string;
   overall_confidence: number;
   model_used: string;
   processed_at: string;
+  lanes_blocked?: LanesBlocked;
+}
+
+// ─── Cost Engine ─────────────────────────────────────────────────────────────
+
+export interface ClearanceEconomicsRequest {
+  location_lat: number;
+  location_lon: number;
+  lanes_blocked: LanesBlocked | Record<string, unknown>;
+  duration_minutes?: number;
+  scene_findings_id?: string;
+}
+
+export interface IncidentSummary {
+  location: string;
+  lat: number;
+  lng: number;
+  duration_minutes: number;
+  lanes_blocked: number;
+  total_lanes: number;
+  capacity_loss_pct: number;
+}
+
+export interface IncidentTotals {
+  primary_cad: number;
+  detour_cad: number;
+  spillback_cad: number;
+  total_cad: number;
+  low_cad: number;
+  high_cad: number;
+}
+
+export interface ClearanceEconomics {
+  computed_at: string;
+  cost_per_minute_cad: number;
+  cost_per_hour_cad: number;
+  incident: IncidentSummary;
+  incident_totals: IncidentTotals;
+}
+
+const economicsCache = new Map<string, ClearanceEconomics>();
+
+export function getCachedEconomics(incidentId: string): ClearanceEconomics | undefined {
+  return economicsCache.get(incidentId);
+}
+
+export async function computeEconomics(
+  incidentId: string,
+  req: ClearanceEconomicsRequest
+): Promise<ClearanceEconomics> {
+  const cached = economicsCache.get(incidentId);
+  if (cached) return cached;
+
+  const res = await fetch(`${BASE}/economics/compute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Economics compute failed: ${res.status}`);
+  }
+  const result: ClearanceEconomics = await res.json();
+  economicsCache.set(incidentId, result);
+  return result;
+}
+
+export function buildEconomicsRequest(report: IncidentReport): ClearanceEconomicsRequest {
+  const lanesBlocked: LanesBlocked = report.scene_findings?.lanes_blocked ?? {
+    direction: "eastbound",
+    lane_numbers: [1],
+    confidence: 0.5,
+  };
+  return {
+    location_lat: report.location.lat,
+    location_lon: report.location.lon,
+    lanes_blocked: lanesBlocked,
+    duration_minutes: 90,
+    scene_findings_id: report.incident_id,
+  };
+}
+
+export async function enrichReportsWithEconomics(
+  reports: IncidentReport[]
+): Promise<Map<string, ClearanceEconomics>> {
+  const results = await Promise.allSettled(
+    reports.map((r) => computeEconomics(r.incident_id, buildEconomicsRequest(r)))
+  );
+  const map = new Map<string, ClearanceEconomics>();
+  results.forEach((outcome, i) => {
+    if (outcome.status === "fulfilled") {
+      map.set(reports[i].incident_id, outcome.value);
+    }
+  });
+  return map;
 }
 
 export interface IncidentReport {
