@@ -1,6 +1,6 @@
 # GridClear Frontend
 
-Marketing landing page modeled after [palantir.com](https://www.palantir.com/) — GridClear branding, same layout and visual language. The `/dashboard` route is a placeholder for the incident command center (built next).
+Marketing site and operational console for GridClear — autonomous collision-scene clearance for first responders.
 
 ## Run locally
 
@@ -9,21 +9,49 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). **Get Started** and **Enter Command Center →** link to `/dashboard`.
+Open [http://localhost:3000](http://localhost:3000).
 
-If the page looks unstyled or returns an error, another app may be stuck on port 3000. Stop other `next dev` processes, then run `npm run dev:clean`.
+| Route | Description |
+|-------|-------------|
+| `/` | Marketing homepage |
+| `/dashboard` | Live incident command center (static demo incidents) |
+| `/collision-map` | Toronto KSI collision heatmap (static bundle in `public/data/`) |
 
-## Hero video
+**Optional backend** (separate repo `grid-clear-backend`):
 
-Hero background: `public/hero.mp4` (scene capture loop). Optional poster: `public/hero-poster.jpg`. To swap the clip, replace `public/hero.mp4` and hard-refresh the browser.
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+If port 3000 is in use: `kill $(lsof -ti:3000)` then `npm run dev`, or use `npm run dev:clean` after stopping other Next.js processes.
+
+Production build:
+
+```bash
+npm run build
+npm start
+```
+
+## Collision map data
+
+Collision points are **bundled locally** (not fetched live on each page load). To refresh from [Toronto Open Data](https://open.toronto.ca/dataset/ksi-motor-vehicle-collisions/):
+
+```bash
+npm run data:ingest
+```
+
+This writes `public/data/toronto-ksi-collisions.json` (~6k collisions, normalized). Commit that file so teammates and deploys load instantly. The heatmap filters by year range in the browser only.
+
+- Map: MapLibre GL + OpenStreetMap raster basemap
+- Layers: H3 hex heatmap + collision dots
 
 ## Structure
 
-- `src/content/home.ts` — all copy and links (edit here to rebrand)
-- `src/components/home/` — landing page sections
-- `src/components/layout/` — header, footer, nav overlay
-- `src/app/dashboard/` — command center stub
+- `src/app/(console)/` — dashboard + collision map (shared `ConsoleShell` nav)
+- `src/components/collision-map/` — MapLibre heatmap
+- `src/lib/toronto-open-data/` — CKAN fetch + coordinate normalization
+- `src/content/` — static copy and demo incidents
 
 ## Stack
 
-Next.js 14 · TypeScript · Tailwind CSS · Lucide icons
+Next.js 14 · TypeScript · Tailwind CSS · MapLibre GL · h3-js

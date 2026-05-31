@@ -18,6 +18,7 @@ export const hero = {
 export const navLinks = [
   { label: "Home", href: "/" },
   { label: "Command Center", href: "/dashboard" },
+  { label: "Collision Map", href: "/collision-map" },
   { label: "Request a Demo", href: "#" },
 ];
 

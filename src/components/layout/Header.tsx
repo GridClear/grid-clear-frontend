@@ -56,9 +56,15 @@ export function Header() {
           <div className="flex items-center gap-2">
             <Link
               href="/dashboard"
-              className="hidden px-5 py-2.5 font-mono text-[11px] font-medium tracking-widest uppercase transition-colors duration-200 sm:inline-block border bg-white border-white text-black hover:bg-transparent hover:text-white"
+              className="hidden px-5 py-2.5 font-mono text-[11px] font-medium tracking-widest uppercase transition-colors duration-200 sm:inline-block border border-white/20 text-white hover:bg-white/10"
             >
               Command Center
+            </Link>
+            <Link
+              href="/collision-map"
+              className="hidden px-5 py-2.5 font-mono text-[11px] font-medium tracking-widest uppercase transition-colors duration-200 sm:inline-block border bg-white border-white text-black hover:bg-transparent hover:text-white"
+            >
+              Collision Map
             </Link>
             <button
               type="button"
