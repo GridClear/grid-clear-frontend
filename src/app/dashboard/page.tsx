@@ -3,16 +3,37 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { Logo } from "@/components/ui/Logo";
-import { incidents, Incident } from "@/content/incidents";
+import { Incident } from "@/lib/incidents";
+import { mapIncidentReportToDashboardIncident } from "@/lib/incidents";
 import { InteractiveMap } from "@/components/dashboard/InteractiveMap";
-import { healthCheck } from "@/lib/api";
+import { healthCheck, listIncidents, getCachedIncidents } from "@/lib/api";
+import { incidents as mockIncidents } from "@/content/incidents";
 
 type BackendStatus = "checking" | "ok" | "error";
 
+const INCIDENT_LIST_LIMIT = 5;
+
+function getInitialIncidents(): { incidents: Incident[]; fromCache: boolean } {
+  const cached = getCachedIncidents(INCIDENT_LIST_LIMIT);
+  if (cached && cached.length > 0) {
+    return {
+      incidents: cached.map(mapIncidentReportToDashboardIncident),
+      fromCache: true,
+    };
+  }
+  return { incidents: [], fromCache: false };
+}
+
 export default function DashboardPage() {
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const initial = getInitialIncidents();
+  const [incidents, setIncidents] = useState<Incident[]>(initial.incidents);
+  const [incidentsLoading, setIncidentsLoading] = useState(!initial.fromCache);
+  const [incidentsError, setIncidentsError] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(
+    initial.incidents[0] ?? null
+  );
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
-  
+
   // Real-time ticking cost accumulator state
   const [accruedCost, setAccruedCost] = useState<number>(0);
 
@@ -24,29 +45,47 @@ export default function DashboardPage() {
       .catch(() => setBackendStatus("error"));
   }, []);
 
-  // Initialize with the first incident on load
   useEffect(() => {
-    if (incidents.length > 0) {
-      setSelectedIncident(incidents[0]);
-    }
+    const cached = getCachedIncidents(INCIDENT_LIST_LIMIT);
+    if (cached && cached.length > 0) return;
+
+    listIncidents({ limit: INCIDENT_LIST_LIMIT })
+      .then((reports) => {
+        const mapped =
+          reports.length > 0
+            ? reports.map(mapIncidentReportToDashboardIncident)
+            : (mockIncidents as Incident[]);
+        setIncidents(mapped);
+        if (mapped.length > 0) setSelectedIncident(mapped[0]);
+      })
+      .catch(() => {
+        setIncidents(mockIncidents as Incident[]);
+        if (mockIncidents.length > 0) setSelectedIncident(mockIncidents[0] as Incident);
+        setIncidentsError(true);
+      })
+      .finally(() => setIncidentsLoading(false));
   }, []);
 
   // Update accrued cost when selected incident changes or over time
   useEffect(() => {
     if (!selectedIncident) return;
-    
-    // Set a base accrued cost based on elapsed time (e.g., 20 mins ago)
-    const baseCost = selectedIncident.costPerMinute * 22; // simulated 22 mins elapsed
+
+    // Use real elapsed time when available (real incidents), else default to 22 min (mock fallback)
+    const elapsedMin = selectedIncident.firstSeenAt
+      ? Math.max(0, (Date.now() - new Date(selectedIncident.firstSeenAt).getTime()) / 60_000)
+      : 22;
+    const baseCost = selectedIncident.costPerMinute * elapsedMin;
     setAccruedCost(baseCost);
 
-    // Tick cost up in real-time ($ per second)
-    const increment = selectedIncident.costPerMinute / 60; // cost per second
+    const increment = selectedIncident.costPerMinute / 60;
     const timer = setInterval(() => {
       setAccruedCost((prev) => prev + increment);
     }, 1000);
 
     return () => clearInterval(timer);
   }, [selectedIncident]);
+
+  const activeCount = incidents.filter((i) => i.status !== "Cleared").length;
 
   return (
     <div className="flex min-h-screen flex-col bg-[#050506] text-white font-mono antialiased selection:bg-gc-accent selection:text-white">
@@ -82,13 +121,31 @@ export default function DashboardPage() {
         <section className="w-full lg:w-[360px] flex flex-col border border-white/10 bg-black/60 rounded-sm overflow-hidden min-h-[300px]">
           <div className="border-b border-white/10 px-4 py-3 bg-white/5 flex items-center justify-between text-[10px] uppercase tracking-wider text-white/40 select-none">
             <span>Live Incident Feeds</span>
-            <span>{incidents.length} active</span>
+            <span>{incidentsLoading ? "—" : `${activeCount} active`}</span>
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+            {incidentsLoading && (
+              <div className="p-6 text-center text-[10px] text-white/30 uppercase tracking-widest">
+                Loading incidents...
+              </div>
+            )}
+
+            {incidentsError && !incidentsLoading && (
+              <div className="p-6 text-center text-[10px] text-gc-accent uppercase tracking-widest">
+                Failed to load incidents
+              </div>
+            )}
+
+            {!incidentsLoading && !incidentsError && incidents.length === 0 && (
+              <div className="p-6 text-center text-[10px] text-white/30 uppercase tracking-widest">
+                No active incidents
+              </div>
+            )}
+
             {incidents.map((incident) => {
               const isSelected = selectedIncident?.id === incident.id;
-              
+
               let statusPill = "bg-gc-accent/10 text-gc-accent border-gc-accent/20";
               let dotColor = "bg-gc-accent";
               if (incident.status === "Cleared") {
@@ -111,11 +168,11 @@ export default function DashboardPage() {
                     <span className="text-[10px] text-white/45">{incident.id}</span>
                     <span className="text-[9px] text-white/30">{incident.timestamp}</span>
                   </div>
-                  
+
                   <h3 className="mt-2 text-sm font-semibold text-white font-heading tracking-tight">
                     {incident.intersection}
                   </h3>
-                  
+
                   <p className="mt-1.5 text-[10px] text-white/50 line-clamp-2 leading-relaxed">
                     {incident.description}
                   </p>
@@ -155,7 +212,7 @@ export default function DashboardPage() {
                   <span>|</span>
                   <span className="text-gc-accent">{selectedIncident.id}</span>
                 </div>
-                
+
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-[10px] uppercase tracking-wider">
                   <div>
                     <span className="block text-white/30 text-[9px]">Location:</span>
@@ -198,7 +255,7 @@ export default function DashboardPage() {
                 </div>
 
                 <Link
-                  href={`/dashboard/incidents/${selectedIncident.id}`}
+                  href={`/dashboard/incidents/${encodeURIComponent(selectedIncident.id)}`}
                   className="mt-4 block text-center border border-white bg-white text-black py-2.5 font-mono text-[10px] font-bold uppercase tracking-widest hover:bg-transparent hover:text-white transition-colors duration-200"
                 >
                   Open 3D Reconstruction Workspace →

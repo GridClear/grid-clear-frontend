@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Incident } from "@/content/incidents";
+import { Incident } from "@/lib/incidents";
 
 interface InteractiveMapProps {
   incidents: Incident[];

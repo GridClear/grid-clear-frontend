@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useEffect, useRef, MouseEvent } from "react";
-import { incidents } from "@/content/incidents";
+import { Incident } from "@/lib/incidents";
+import { mapIncidentReportToDashboardIncident } from "@/lib/incidents";
+import { getIncidentById, getCachedIncident } from "@/lib/api";
 import { ThreeDViewer } from "@/components/dashboard/ThreeDViewer";
 import { ArrowLeft, Move, RefreshCw } from "lucide-react";
 
@@ -15,10 +17,14 @@ interface WidgetPosition {
 
 export default function IncidentDetailsPage() {
   const params = useParams();
-  const id = params.id as string;
+  const rawId = params.id as string;
+  const id = decodeURIComponent(rawId);
 
-  // Find the incident
-  const incident = incidents.find((inc) => inc.id === id);
+  const [incident, setIncident] = useState<Incident | null>(() => {
+    const cached = getCachedIncident(id);
+    return cached ? mapIncidentReportToDashboardIncident(cached) : null;
+  });
+  const [fetchDone, setFetchDone] = useState(() => !!getCachedIncident(id));
 
   // Layout positions for draggable widgets
   const defaultPositions = {
@@ -52,10 +58,28 @@ export default function IncidentDetailsPage() {
   const [isDrawingSig, setIsDrawingSig] = useState<boolean>(false);
 
   useEffect(() => {
+    const cached = getCachedIncident(id);
+    if (cached) {
+      setIncident(mapIncidentReportToDashboardIncident(cached));
+      setFetchDone(true);
+      return;
+    }
+
+    setFetchDone(false);
+    getIncidentById(id)
+      .then((report) => {
+        setIncident(mapIncidentReportToDashboardIncident(report));
+      })
+      .catch(() => {
+        setIncident(null);
+      })
+      .finally(() => setFetchDone(true));
+  }, [id]);
+
+  useEffect(() => {
     if (!incident) return;
     setCurrentStatus(incident.status);
-    
-    // Set initial steps checked based on status
+
     if (incident.status === "Modeling") {
       setCheckedSteps({ scout: true, fusion: false, cost: false, detour: false, signed: false });
     } else if (incident.status === "Ready for Review") {
@@ -65,11 +89,11 @@ export default function IncidentDetailsPage() {
       setIsCleared(true);
     }
 
-    // Set base accrued cost based on elapsed time (22 minutes)
-    const baseCost = incident.costPerMinute * 22;
-    setAccruedCost(baseCost);
+    const elapsedMin = incident.firstSeenAt
+      ? Math.max(0, (Date.now() - new Date(incident.firstSeenAt).getTime()) / 60_000)
+      : 22;
+    setAccruedCost(incident.costPerMinute * elapsedMin);
 
-    // Tick cost up in real-time ($ per second) if not cleared
     const increment = incident.costPerMinute / 60;
     const timer = setInterval(() => {
       if (!isCleared) {
@@ -79,6 +103,14 @@ export default function IncidentDetailsPage() {
 
     return () => clearInterval(timer);
   }, [incident, isCleared]);
+
+  if (!fetchDone) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#050506] text-white font-mono p-6">
+        <span className="text-[10px] uppercase tracking-widest text-white/40 animate-pulse">Loading incident...</span>
+      </div>
+    );
+  }
 
   if (!incident) {
     return (
